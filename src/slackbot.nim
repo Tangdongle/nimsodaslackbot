@@ -8,7 +8,6 @@ import parseopt, os
 
 let db = open("sodabot.db", "sodabot", "sodabot", "sodabot")
 
-
 proc handler() {.noconv.} =
     echo "Close handler"
     db.close()
@@ -70,7 +69,6 @@ Product   Quantity   User
 ===================
 """ % arg
             for row in db.rows(sql"SELECT product_name, quantity, user FROM sodabot WHERE product_name=?", arg):
-                echo $row
                 outMessage.add(rowListToLine(row))
             discard sendMessage(rtmConnection, newSlackMessage("message", message.channel, outMessage, slackUser.id))
         of "listall":
@@ -79,11 +77,14 @@ Listing all records
 ===================
 """
             for row in db.rows(sql"SELECT product_name, quantity, user FROM sodabot"):
-                echo $row
                 outMessage.add(rowListToLine(row))
             discard sendMessage(rtmConnection, newSlackMessage("message", message.channel, outMessage, slackUser.id))
         of "listuser":
-            let arg = command.split("/")[1].split(" ")[1].strip(chars = {'<', '>', '@'})
+            var arg = ""
+            if command.contains "@":
+                arg = command.split("/")[1].split(" ")[1].strip(chars = {'<', '>', '@'})
+            else:
+                arg = slackUserTable.findUserByName(command.split("/")[1].split(" ")[1]).id
             var outMessage = """
 Listing user $#
 Product   Total
@@ -97,7 +98,7 @@ Product   Total
             discard sendMessage(rtmConnection, newSlackMessage("message", message.channel, outMessage, slackUser.id))
         of "listallusers":
             var outMessage = """
-Listing all users $#
+Listing all users 
 User   Product   Total
 ===================
 """
