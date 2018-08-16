@@ -4,20 +4,9 @@ import slackapi
 import asyncdispatch, asyncnet
 import strutils
 import db_sqlite
-import os
+import parseopt, os
 
 let db = open("sodabot.db", "sodabot", "sodabot", "sodabot")
-
-try:
-    db.exec(sql("""
-CREATE TABLE sodabot (
-id INTEGER PRIMARY KEY,
-product_name VARCHAR(254) not null,
-quantity INTEGER not null
-    )"""))
-except DbError:
-    #Table exists
-    echo "Table exists"
 
 
 proc handler() {.noconv.} =
@@ -27,62 +16,110 @@ proc handler() {.noconv.} =
 
 setControlCHook(handler)
 
-proc rowToLine(row: Row): string =
+proc rowListToLine(row: Row): string =
     #[
     Formats a row to be a little more user friendly
     ]#
-    result = "$#: $#\L" % [row[0], row[1]]
+    result = "$#:\t $# by $#\L" % [row[0], row[1], slackUserTable[row[2]].name]
 
-proc processDirectMessage(parsedData: JsonNode): SlackMessage {.async.} =
-    let command = parsedData["text"].getStr.split(">")[1].strip()
-    echo command
+proc rowSumsToLine(row: Row): string =
+    result = "$#:\t $#\L" % [row[0], row[1]]
+
+proc rowUserSumsToLine(row: Row): string = 
+    result = "$#:\t $#: $#\L" % [slackUserTable[row[0]].name, row[1], row[2]]
+
+proc processDirectMessage(message: SlackMessage): Future[void] {.async.} =
+    #[
+    Processed messages directly to the bot
+    TODO: Add a message buffer
+    ]#
+    echo "In Process Direct Message"
+    let command = message.text.split(">")[1].strip()
     if command.startsWith("/"):
+        #Wait in between commands so we don't flood
+        if not slackUserTable.hasKey(message.user):
+            echo "No user found for <$#>" % message.user
+            return
+        await sleepAsync(1000)
         #Builtin command
         case command.split("/")[1].split(" ")[0]:
         of "help":
-            result = newSlackMessage("message", parsedData["channel"].getStr, 
+            discard sendMessage(rtmConnection, newSlackMessage("message", message.channel, 
             """
 Sodabot Help:
 =============
 /add <product> <quantity>   - Adds a product purchase to the DB
 /list <product>             - Lists the purchases for a product
 /listall                    - Lists all purchases to date
-            """)
+/listuser <user>            - Lists all purchases by user
+/listallusers <user>            - Lists all purchases by user
+            """, slackUser.id))
         of "add":
             echo "Adding"
             db.exec(sql"BEGIN")
-            db.exec(sql"INSERT INTO sodabot (product_name, quantity) VALUES (?, ?)",
-                command.split("/")[1].split(" ")[1..2])
+            db.exec(sql"INSERT INTO sodabot (product_name, quantity, user) VALUES (?, ?, ?)",
+                [command.split("/")[1].split(" ")[1], command.split("/")[1].split(" ")[2], message.user])
             db.exec(sql"COMMIT")
+            discard sendMessage(rtmConnection, newSlackMessage("message", message.channel, "Purchase recorded!", slackUser.id))
         of "list":
+            let arg = command.split("/")[1].split(" ")[1]
             echo "Listing"
-            var message = ""
-            for row in db.rows(sql"SELECT product_name, quantity FROM sodabot WHERE product_name=?", command.split("/")[1].split(" ")[1]):
-                message.add(rowToLine(row))
-            return newSlackMessage("message", parsedData["channel"].getStr, message)
+            var outMessage = """
+Listing records for $#
+Product   Quantity   User
+===================
+""" % arg
+            for row in db.rows(sql"SELECT product_name, quantity, user FROM sodabot WHERE product_name=?", arg):
+                echo $row
+                outMessage.add(rowListToLine(row))
+            discard sendMessage(rtmConnection, newSlackMessage("message", message.channel, outMessage, slackUser.id))
         of "listall":
-            echo "Listing all"
-    echo "Returnign no result!"
+            var outMessage = """
+Listing all records
+===================
+"""
+            for row in db.rows(sql"SELECT product_name, quantity, user FROM sodabot"):
+                echo $row
+                outMessage.add(rowListToLine(row))
+            discard sendMessage(rtmConnection, newSlackMessage("message", message.channel, outMessage, slackUser.id))
+        of "listuser":
+            let arg = command.split("/")[1].split(" ")[1].strip(chars = {'<', '>', '@'})
+            var outMessage = """
+Listing user $#
+Product   Total
+===================
+""" % slackUserTable[arg].name
+            for row in db.rows(sql"""SELECT product_name, SUM(quantity) 
+                FROM sodabot 
+                WHERE user=?
+                GROUP BY product_name""", arg):
+                outMessage.add(rowSumsToLine(row))
+            discard sendMessage(rtmConnection, newSlackMessage("message", message.channel, outMessage, slackUser.id))
+        of "listallusers":
+            var outMessage = """
+Listing all users $#
+User   Product   Total
+===================
+"""
+            for row in db.rows(sql"""SELECT user, product_name, SUM(quantity) 
+                FROM sodabot 
+                GROUP BY user, product_name"""):
+                outMessage.add(rowUserSumsToLine(row))
+            discard sendMessage(rtmConnection, newSlackMessage("message", message.channel, outMessage, slackUser.id))
+    echo "Returning no result!"
 
 proc serve() {.async.} =
     while true:
-        let (opcode, data) = await rtmConnection.sock.readData()
-        echo data
-        if data.len > 0 and isTextOpcode(opcode):
-            let parsedData = parseJson(data)
-            if parsedData.hasKey("reply_to"):
-                #Reply to a directed message here
-                continue
-            elif parsedData["type"].getStr == $SlackRTMType.Message:
-                #Parse normal messages here
-                if parsedData["user"].getStr != slackUser.id:
-                    if parsedData["text"].getStr.startsWith("<@$#>" % slackUser.id):
-                        #Directed message
-                        let message = processDirectMessage(parsedData)
-                        discard sendMessage(rtmConnection, message)
-                    else:
-                        let message = newSlackMessage("message", parsedData["channel"].getStr, parsedData["text"].getStr)
-                        discard sendMessage(rtmConnection, message)
+        let message = await rtmConnection.readSlackMessage()
+        if not isNil(message.text):
+            #Parse normal messages here
+            if not isNil(message.user) and message.user != slackUser.id:
+                if message.text.startsWith("<@$#>" % slackUser.id):
+                    #Directed message
+                    asyncCheck processDirectMessage(message)
+                else:
+                    let outMessage = newSlackMessage("message", message.channel, message.text, slackUser.id)
+                    discard sendMessage(rtmConnection, message)
 
 
 proc ping() {.async.} =
@@ -91,7 +128,48 @@ proc ping() {.async.} =
         echo "ping"
         await rtmConnection.sock.sendPing(masked = true)
 
-asyncCheck serve()
-asyncCheck ping()
-runForever()
+when isMainModule:
+    let 
+        filename = getAppFilename()
+        args = commandLineParams()
+    
+    try:
+        db.exec(sql("""
+    CREATE TABLE sodabot (
+    id INTEGER PRIMARY KEY,
+    product_name VARCHAR(254) not null,
+    quantity INTEGER not null
+    user VARCHAR(254) not null
+        )"""))
+    except DbError:
+        #Table exists
+        echo "Table exists"
+
+    var parser = initOptParser(args)
+    for kind, key, val in parser.getopt():
+        case kind
+        of cmdArgument:
+            echo "Filename: " & key
+        of cmdLongOption, cmdShortOption:
+            case key
+            of "rebuild-sql":
+                echo "Rebuilding SQL table"
+                try:
+                    db.exec(sql"DROP TABLE sodabot")
+                except DBError:
+                    echo "Table does not exist, building"
+                db.exec(sql"""
+                    CREATE TABLE sodabot (
+                    id INTEGER PRIMARY KEY,
+                    product_name VARCHAR(254) not null,
+                    quantity INTEGER not null,
+                    user VARCHAR(254) not null
+                    )""")
+        of cmdEnd:
+            assert(false)
+
+
+    asyncCheck serve()
+    asyncCheck ping()
+    runForever()
 

@@ -12,3 +12,10 @@ bin           = @["slackbot"]
 requires "nim >= 0.18.0"
 requires "slackapi"
 
+task rebuildSQL, "Rebuild the SQL table":
+    exec("nim c -d:ssl --out:bin/slackbot src/slackbot")
+    exec("bin/slackbot --rebuild-sql")
+
+task run, "Run the bot":
+    exec("nim c -r -d:ssl --out:bin/slackbot src/slackbot")
+
