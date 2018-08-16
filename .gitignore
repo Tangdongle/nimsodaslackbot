@@ -1,1 +1,4 @@
-nimcache
+src/nimcache
+bin/
+tests/bin/
+tests/nimcache/
