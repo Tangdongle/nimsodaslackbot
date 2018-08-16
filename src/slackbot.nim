@@ -123,12 +123,6 @@ proc serve() {.async.} =
                     discard sendMessage(rtmConnection, message)
 
 
-proc ping() {.async.} =
-    while true:
-        await sleepAsync(6000)
-        echo "ping"
-        await rtmConnection.sock.sendPing(masked = true)
-
 when isMainModule:
     let 
         filename = getAppFilename()
