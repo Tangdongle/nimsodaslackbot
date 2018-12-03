@@ -8,7 +8,7 @@ import parseopt, os
 
 let db = open("sodabot.db", "sodabot", "sodabot", "sodabot")
 
-const AT_USER_SYMBOL = "^"
+const AT_USER_SYMBOL = '^'
 const SODA_HELP = """
 Sodabot Help:
 =============
@@ -111,8 +111,8 @@ User   Product   Total
         GROUP BY user, product_name"""):
         outMessage.add(rowUserSumsToLine(row))
       discard sendMessage(rtmConnection, newSlackMessage("message", message.channel, outMessage, slackUser.id))
-    of "tellthisguy":
-      let targetString = command.split("tellthisguy")[^1].strip().split(AT_USER_SYMBOL)[^1]
+    of "tell":
+      let targetString = command.split("tell")[^1].strip().split(AT_USER_SYMBOL)[^1]
       let user = slackUserTable.findUserByName(targetString.splitWhiteSpace()[0])
       let outMessage = "$#" % targetString.splitWhiteSpace()[1 .. ^1].join(" ")
       echo "Sending Tell message"

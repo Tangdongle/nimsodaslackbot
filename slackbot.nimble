@@ -17,5 +17,6 @@ task rebuildSQL, "Rebuild the SQL table":
     exec("bin/slackbot --rebuild-sql")
 
 task run, "Run the bot":
+    exec("mkdir -p bin")
     exec("nim c -r -d:ssl --out:bin/slackbot src/slackbot")
 
