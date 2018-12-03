@@ -114,8 +114,11 @@ User   Product   Total
     of "tellthisguy":
       let targetString = command.split("tellthisguy")[^1].strip().split(AT_USER_SYMBOL)[^1]
       let user = slackUserTable.findUserByName(targetString.splitWhiteSpace()[0])
-      let outMessage = "<@$#> $#" % [user.id, targetString.splitWhiteSpace()[1]]
-      discard sendMessage(rtmConnection, newSlackMessage("message", message.channel, outMessage, slackUser.id))
+      let outMessage = "$#" % targetString.splitWhiteSpace()[1 .. ^1].join(" ")
+      echo "Sending Tell message"
+      let channel = await rtmConnection.openIMChannelForUser(user)
+      assert channel.is_im == true
+      discard sendMessage(rtmConnection, newSlackMessage("message", channel.id, outMessage, slackUser.id))
 
   echo "Returning no result!"
 
@@ -123,7 +126,8 @@ proc serve() {.async.} =
   let slackBotUser = slackUserTable.findUserByName("slackbot")
   while true:
     let message = await rtmConnection.readSlackMessage()
-    if message.text.len > 0:
+    echo message
+    if message.text.len > 0 and message.hidden == false:
       #Parse normal messages here
       if message.user.len > 0 and message.user != slackUser.id and message.user != "USLACKBOT":
         if message.text.startsWith("<@$#>" % slackUser.id):
