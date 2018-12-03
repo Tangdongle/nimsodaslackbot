@@ -9,7 +9,7 @@ bin           = @["slackbot"]
 
 # Dependencies
 
-requires "nim >= 0.18.0"
+requires "nim >= 0.19.0"
 requires "slackapi"
 
 task rebuildSQL, "Rebuild the SQL table":

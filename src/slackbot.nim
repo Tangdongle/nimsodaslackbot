@@ -112,9 +112,9 @@ User   Product   Total
 proc serve() {.async.} =
     while true:
         let message = await rtmConnection.readSlackMessage()
-        if not isNil(message.text):
+        if not isNilOrEmpty(message.text):
             #Parse normal messages here
-            if not isNil(message.user) and message.user != slackUser.id:
+            if not isNilOrEmpty(message.user) and message.user != slackUser.id:
                 if message.text.startsWith("<@$#>" % slackUser.id):
                     #Directed message
                     asyncCheck processDirectMessage(message)
